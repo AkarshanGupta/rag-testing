@@ -10,3 +10,4 @@ langchain-chroma
 pypdf
 beautifulsoup4
 python-multipart
+slowapi
