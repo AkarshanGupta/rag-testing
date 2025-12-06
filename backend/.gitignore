@@ -1,0 +1,22 @@
+# --- Security (CRITICAL) ---
+.env
+.env.local
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- Virtual Environments ---
+venv/
+env/
+.venv/
+
+# --- Database (Local Testing) ---
+chroma_db/
+chroma_data/
+
+# --- IDE Settings (Optional but good) ---
+.vscode/
+.idea/
+.DS_Store
