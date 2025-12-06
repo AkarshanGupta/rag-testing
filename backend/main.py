@@ -160,9 +160,8 @@ from langchain_chroma import Chroma
 from langchain_community.document_loaders import PyPDFLoader, WebBaseLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 # NOTE: 'langchain_classic' is not standard. Using standard 'langchain.chains'
-# CORRECT
-from langchain.chains import create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
 # --- CONFIGURATION CHECKS ---
@@ -272,9 +271,8 @@ async def ingest_file(request: Request, file: UploadFile = File(...)):
         return {"message": f"Success! Ingested {file.filename}."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 @app.post("/ask", response_model=QueryResponse)
-@limiter.limit("20/minute") # <--- PUBLIC (Higher limit)
+@limiter.limit("20/minute")
 async def ask_question(request: Request, query_body: QueryRequest):
     # 1. Retrieve
     retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 5})
@@ -298,15 +296,32 @@ async def ask_question(request: Request, query_body: QueryRequest):
         ("human", "{input}"),
     ])
 
-    # 4. Run Chain
-    question_answer_chain = create_stuff_documents_chain(llm, prompt)
-    rag_chain = create_retrieval_chain(retriever, question_answer_chain)
-    
-    # Note: We use query_body.question because we renamed the argument
-    result = rag_chain.invoke({"input": query_body.question})
+    # 4. Format documents function
+    def format_docs(docs):
+        return "\n\n".join(doc.page_content for doc in docs)
 
-    sources = [doc.metadata.get("source", "Unknown") for doc in result.get("context", [])]
+    # 5. Create the RAG chain using LCEL (LangChain Expression Language)
+    from langchain_core.runnables import RunnablePassthrough
+    from langchain_core.output_parsers import StrOutputParser
+    
+    rag_chain = (
+        {
+            "context": retriever | format_docs,
+            "input": RunnablePassthrough()
+        }
+        | prompt
+        | llm
+        | StrOutputParser()
+    )
+    
+    # 6. Invoke the chain
+    answer = rag_chain.invoke(query_body.question)
+    
+    # 7. Get source documents separately for the response
+    docs = retriever.invoke(query_body.question)
+    sources = [doc.metadata.get("source", "Unknown") for doc in docs]
+    
     return {
-        "answer": result["answer"],
+        "answer": answer,
         "source_documents": list(set(sources))
     }
