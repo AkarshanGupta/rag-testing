@@ -71,8 +71,8 @@ recipe-ai-assistant/
 
 1. **Clone the repository**
 ```bash
-git clone https://github.com/yourusername/recipe-ai-assistant.git
-cd recipe-ai-assistant/backend
+git clone https://github.com/AkarshanGupta/rag-testing.git
+cd rag-testing/backend
 ```
 
 2. **Create virtual environment**
