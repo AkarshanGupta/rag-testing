@@ -146,6 +146,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Header, Depends, Request
+from fastapi.middleware.cors import CORSMiddleware  # <--- ADD THIS
 from pydantic import BaseModel
 import chromadb
 
@@ -159,7 +160,6 @@ from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmb
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import PyPDFLoader, WebBaseLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-# NOTE: 'langchain_classic' is not standard. Using standard 'langchain.chains'
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -169,7 +169,7 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 CHROMA_API_KEY = os.getenv("CHROMA_API_KEY")
 CHROMA_TENANT = os.getenv("CHROMA_TENANT")
 CHROMA_DATABASE = os.getenv("CHROMA_DATABASE")
-ADMIN_SECRET = os.getenv("ADMIN_SECRET")  # <--- NEW: Get the password
+ADMIN_SECRET = os.getenv("ADMIN_SECRET")
 
 if not GOOGLE_API_KEY or not CHROMA_API_KEY:
     raise ValueError("Missing API Keys in .env file")
@@ -178,10 +178,23 @@ if not ADMIN_SECRET:
     print("⚠️ WARNING: ADMIN_SECRET is missing. Admin routes will be insecure!")
 
 # --- 2. SETUP RATE LIMITER ---
-# This tracks users by their IP address to stop spam
 limiter = Limiter(key_func=get_remote_address)
 
 app = FastAPI(title="Recipe Assistant (Secured)")
+
+# --- 3. ADD CORS MIDDLEWARE (CRITICAL FIX) ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://rag-frontend-ashy-sigma.vercel.app",  # Your Vercel frontend
+        "http://localhost:5173",  # Local development (Vite)
+        "http://localhost:3000",  # Local development (React)
+        "*"  # TEMPORARY: Allow all origins (remove in production for security)
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all methods (GET, POST, etc.)
+    allow_headers=["*"],  # Allow all headers including x-admin-token
+)
 
 # Connect the rate limiter to the app
 app.state.limiter = limiter
@@ -235,8 +248,8 @@ def get_loader(file_path: str, file_type: str):
 def health_check():
     return {"status": "Running", "security": "Active"}
 
-@app.post("/ingest-url", dependencies=[Depends(verify_admin)]) # <--- LOCKED
-@limiter.limit("5/minute") # <--- RATE LIMITED
+@app.post("/ingest-url", dependencies=[Depends(verify_admin)])
+@limiter.limit("5/minute")
 async def ingest_url(request: Request, url: str = Form(...)):
     """
     Upload a URL. Requires 'x-admin-token' header.
@@ -251,7 +264,7 @@ async def ingest_url(request: Request, url: str = Form(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/ingest-file", dependencies=[Depends(verify_admin)]) # <--- LOCKED
+@app.post("/ingest-file", dependencies=[Depends(verify_admin)])
 @limiter.limit("5/minute")
 async def ingest_file(request: Request, file: UploadFile = File(...)):
     """
@@ -271,6 +284,7 @@ async def ingest_file(request: Request, file: UploadFile = File(...)):
         return {"message": f"Success! Ingested {file.filename}."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/ask", response_model=QueryResponse)
 @limiter.limit("20/minute")
 async def ask_question(request: Request, query_body: QueryRequest):
@@ -300,10 +314,7 @@ async def ask_question(request: Request, query_body: QueryRequest):
     def format_docs(docs):
         return "\n\n".join(doc.page_content for doc in docs)
 
-    # 5. Create the RAG chain using LCEL (LangChain Expression Language)
-    from langchain_core.runnables import RunnablePassthrough
-    from langchain_core.output_parsers import StrOutputParser
-    
+    # 5. Create the RAG chain using LCEL
     rag_chain = (
         {
             "context": retriever | format_docs,
